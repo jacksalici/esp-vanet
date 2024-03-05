@@ -1,14 +1,6 @@
-/*
-To test connection, type the following into the serial monitor:
-  AT Z
-  AT E0
-  AT S0
-  AT AL
-  AT TP A0
-*/
 
 #include "BluetoothSerial.h"
-
+#include "ELMduino.h"
 
 BluetoothSerial SerialBT;
 
@@ -16,6 +8,9 @@ BluetoothSerial SerialBT;
 #define DEBUG_PORT Serial
 #define ELM_PORT   SerialBT
 uint8_t address[6] = { 0x00, 0x10, 0xCC, 0x4F, 0x36, 0x03 };
+float rpm = 0;
+
+ELM327 myELM327;
 
 void setup()
 {
@@ -33,29 +28,23 @@ void setup()
   }
 
   DEBUG_PORT.println("Connected to ELM327");
-  DEBUG_PORT.println("Ensure your serial monitor line ending is set to 'Carriage Return'");
-  DEBUG_PORT.println("Type and send commands/queries to your ELM327 through the serial monitor");
-  DEBUG_PORT.println();
+  myELM327.begin(ELM_PORT, true, 2000);
 }
 
 
 void loop()
 {
-  if(DEBUG_PORT.available())
-  {
-    char c = DEBUG_PORT.read();
-
-    DEBUG_PORT.write(c);
-    ELM_PORT.write(c);
-  }
-
-  if(ELM_PORT.available())
-  {
-    char c = ELM_PORT.read();
-
-    if(c == '>')
-      DEBUG_PORT.println();
-
-    DEBUG_PORT.write(c);
-  }
+  rpm = myELM327.rpm();
+      
+    if (myELM327.nb_rx_state == ELM_SUCCESS)
+    {
+      DEBUG_PORT.print("rpm: ");
+      DEBUG_PORT.println(rpm);
+    }
+    else
+    {
+      DEBUG_PORT.println("ERROR");
+      myELM327.printError();
+      
+    }
 }

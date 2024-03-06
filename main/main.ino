@@ -23,12 +23,12 @@ void setup()
   if (!ELM_PORT.connect(address))
   {
     DEBUG_PORT.println("Couldn't connect to OBD scanner");
-    while (1)
+    while (1)n
       ;
   }
 
   DEBUG_PORT.println("Connected to ELM327");
-  myELM327.begin(ELM_PORT, true, 2000);
+  myELM327.begin(ELM_PORT, false, 2000);
 }
 
 void loop()
@@ -43,4 +43,5 @@ void loop()
   }
   else if (myELM327.nb_rx_state != ELM_GETTING_MSG)
     myELM327.printError();
+
 }

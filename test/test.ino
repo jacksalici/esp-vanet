@@ -22,7 +22,7 @@
 #define   BLINK_DURATION  100  // milliseconds LED is on for
 
 #define   MESH_SSID       "VANET"
-#define   MESH_PASSWORD   "vanet"
+#define   MESH_PASSWORD   "vanet123"
 #define   MESH_PORT       5555
 
 // Prototypes

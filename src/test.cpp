@@ -9,6 +9,7 @@
 //
 //************************************************************
 #include <painlessMesh.h>
+#include <Arduino.h>
 
 // some gpio pin that is connected to an LED...
 // on my rig, this is 5, change to the right number of your LED.

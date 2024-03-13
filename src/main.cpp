@@ -2,6 +2,7 @@
 #include "BluetoothSerial.h"
 #include <painlessMesh.h>
 #include "ELMduino.h"
+#include "Arduino.h"
 
 BluetoothSerial SerialBT;
 

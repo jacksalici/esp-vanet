@@ -1,158 +1,218 @@
-//************************************************************
-// this is a simple example that uses the easyMesh library
-//
-// 1. blinks led once for every node on the mesh
-// 2. blink cycle repeats every BLINK_PERIOD
-// 3. sends a silly message to every node on the mesh at a random time between 1 and 5 seconds
-// 4. prints anything it receives to Serial.print
-//
-//
-//************************************************************
-#include <painlessMesh.h>
-#include <Arduino.h>
 
-// some gpio pin that is connected to an LED...
-// on my rig, this is 5, change to the right number of your LED.
-#ifdef LED_BUILTIN
-#define LED LED_BUILTIN
-#else
-#define LED 2
-#endif
+/**
+ESPNOW - Basic communication - Broadcast
+Date: 28th September 2017
+Original Author: Arvind Ravulavaru <https://github.com/arvindr21>
+modified by Daniel de kock
+Purpose: ESPNow Communication using Broadcast
 
-#define   BLINK_PERIOD    3000 // milliseconds until cycle repeat
-#define   BLINK_DURATION  100  // milliseconds LED is on for
+Resources: (A bit outdated)
+a. https://espressif.com/sites/default/files/documentation/esp-now_user_guide_en.pdf
+b. http://www.esploradores.com/practica-6-conexion-esp-now/
+*/
 
-#define   MESH_SSID       "VANET"
-#define   MESH_PASSWORD   "vanet123"
-#define   MESH_PORT       5555
+#include <esp_now.h>
+#include <WiFi.h>
 
-// Prototypes
-void sendMessage(); 
-void receivedCallback(uint32_t from, String & msg);
-void newConnectionCallback(uint32_t nodeId);
-void changedConnectionCallback(); 
-void nodeTimeAdjustedCallback(int32_t offset); 
-void delayReceivedCallback(uint32_t from, int32_t delay);
+// Global copy of slave / peer device 
+// for broadcasts the addr needs to be ff:ff:ff:ff:ff:ff
+// all devices on the same channel
+esp_now_peer_info_t slave;
 
-Scheduler     userScheduler; // to control your personal task
-painlessMesh  mesh;
+#define PRINTSCANRESULTS 0
+#define DELETEBEFOREPAIR 0
 
-bool calc_delay = false;
-SimpleList<uint32_t> nodes;
+// Init ESP Now with fallback
+void InitESPNow() {
+	if (esp_now_init() == ESP_OK) {
+		Serial.println("ESPNow Init Success");
+	}
+	else {
+		Serial.println("ESPNow Init Failed");
+		// Retry InitESPNow, add a counte and then restart?
+		// InitESPNow();
+		// or Simply Restart
+		ESP.restart();
+	}
+}
+void initBroadcastSlave() {
+	// clear slave data
+	memset(&slave, 0, sizeof(slave));
+	for (int ii = 0; ii < 6; ++ii) {
+		slave.peer_addr[ii] = (uint8_t)0xff;
+	}
+	slave.encrypt = 0; // no encryption
+	manageSlave();
+}
 
-void sendMessage() ; // Prototype
-Task taskSendMessage( TASK_SECOND * 1, TASK_FOREVER, &sendMessage ); // start with a one second interval
 
-// Task to blink the number of nodes
-Task blinkNoNodes;
-bool onFlag = false;
+// Check if the slave is already paired with the master.
+// If not, pair the slave with master
+bool manageSlave() {
+	if (true) {
+		if (DELETEBEFOREPAIR) {
+			deletePeer();
+		}
+
+		Serial.print("Slave Status: ");
+		const esp_now_peer_info_t *peer = &slave;
+		const uint8_t *peer_addr = slave.peer_addr;
+		// check if the peer exists
+		bool exists = esp_now_is_peer_exist(peer_addr);
+		if (exists) {
+			// Slave already paired.
+			Serial.println("Already Paired");
+			return true;
+		}
+		else {
+			// Slave not paired, attempt pair
+			esp_err_t addStatus = esp_now_add_peer(peer);
+			if (addStatus == ESP_OK) {
+				// Pair success
+				Serial.println("Pair success");
+				return true;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_NOT_INIT) {
+				// How did we get so far!!
+				Serial.println("ESPNOW Not Init");
+				return false;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_ARG) {
+				Serial.println("Invalid Argument");
+				return false;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_FULL) {
+				Serial.println("Peer list full");
+				return false;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_NO_MEM) {
+				Serial.println("Out of memory");
+				return false;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_EXIST) {
+				Serial.println("Peer Exists");
+				return true;
+			}
+			else {
+				Serial.println("Not sure what happened");
+				return false;
+			}
+		}
+	}
+	else {
+		// No slave found to process
+		Serial.println("No Slave found to process");
+		return false;
+	}
+}
+
+void deletePeer() {
+	const esp_now_peer_info_t *peer = &slave;
+	const uint8_t *peer_addr = slave.peer_addr;
+	esp_err_t delStatus = esp_now_del_peer(peer_addr);
+	Serial.print("Slave Delete Status: ");
+	if (delStatus == ESP_OK) {
+		// Delete success
+		Serial.println("Success");
+	}
+	else if (delStatus == ESP_ERR_ESPNOW_NOT_INIT) {
+		// How did we get so far!!
+		Serial.println("ESPNOW Not Init");
+	}
+	else if (delStatus == ESP_ERR_ESPNOW_ARG) {
+		Serial.println("Invalid Argument");
+	}
+	else if (delStatus == ESP_ERR_ESPNOW_NOT_FOUND) {
+		Serial.println("Peer not found.");
+	}
+	else {
+		Serial.println("Not sure what happened");
+	}
+}
+
+
+// send data
+void sendData(uint8_t counter) {
+	uint8_t data = counter;
+	// const uint8_t *peer_addr = NULL;
+	const uint8_t *peer_addr = slave.peer_addr;
+
+	Serial.print("Sending: "); Serial.println(data);
+	esp_err_t result = esp_now_send(peer_addr, &data, sizeof(data));
+	Serial.print("Send Status: ");
+	if (result == ESP_OK) {
+		Serial.println("Success");
+	}
+	else if (result == ESP_ERR_ESPNOW_NOT_INIT) {
+		// How did we get so far!!
+		Serial.println("ESPNOW not Init.");
+	}
+	else if (result == ESP_ERR_ESPNOW_ARG) {
+		Serial.println("Invalid Argument");
+	}
+	else if (result == ESP_ERR_ESPNOW_INTERNAL) {
+		Serial.println("Internal Error");
+	}
+	else if (result == ESP_ERR_ESPNOW_NO_MEM) {
+		Serial.println("ESP_ERR_ESPNOW_NO_MEM");
+	}
+	else if (result == ESP_ERR_ESPNOW_NOT_FOUND) {
+		Serial.println("Peer not found.");
+	}
+	else {
+		Serial.println("Not sure what happened");
+	}
+}
+
+// callback when data is sent from Master to Slave
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+	char macStr[18];
+	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+		mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+	Serial.print("Last Packet Sent to: "); Serial.println(macStr);
+	Serial.print("Last Packet Send Status: "); Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+
+// callback when data is recv from Master
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+	char macStr[18];
+	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+		mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+	Serial.print("Last Packet Recv from: "); Serial.println(macStr);
+	Serial.print("Last Packet Recv Data: "); Serial.println(*data);
+	Serial.println("");
+}
+
+
 
 void setup() {
-  Serial.begin(115200);
+	Serial.begin(115200);
+	//Set device in STA mode to begin with
+	WiFi.mode(WIFI_STA);
+	Serial.println("ESPNow/Basic/Master Example");
+	// This is the mac address of the Master in Station Mode
+	Serial.print("STA MAC: "); Serial.println(WiFi.macAddress());
+	// Init ESPNow with a fallback logic
+	InitESPNow();
+	// Once ESPNow is successfully Init, we will register for Send CB to
+	// get the status of Trasnmitted packet
+	esp_now_register_send_cb(OnDataSent);
+	esp_now_register_recv_cb(OnDataRecv);
 
-  pinMode(LED, OUTPUT);
-
-  mesh.setDebugMsgTypes(ERROR | DEBUG);  // set before init() so that you can see error messages
-
-  mesh.init(MESH_SSID, MESH_PASSWORD, &userScheduler, MESH_PORT);
-  mesh.onReceive(&receivedCallback);
-  mesh.onNewConnection(&newConnectionCallback);
-  mesh.onChangedConnections(&changedConnectionCallback);
-  mesh.onNodeTimeAdjusted(&nodeTimeAdjustedCallback);
-  mesh.onNodeDelayReceived(&delayReceivedCallback);
-
-  userScheduler.addTask( taskSendMessage );
-  taskSendMessage.enable();
-
-  blinkNoNodes.set(BLINK_PERIOD, (mesh.getNodeList().size() + 1) * 2, []() {
-      // If on, switch off, else switch on
-      if (onFlag)
-        onFlag = false;
-      else
-        onFlag = true;
-      blinkNoNodes.delay(BLINK_DURATION);
-
-      if (blinkNoNodes.isLastIteration()) {
-        // Finished blinking. Reset task for next run 
-        // blink number of nodes (including this node) times
-        blinkNoNodes.setIterations((mesh.getNodeList().size() + 1) * 2);
-        // Calculate delay based on current mesh time and BLINK_PERIOD
-        // This results in blinks between nodes being synced
-        blinkNoNodes.enableDelayed(BLINK_PERIOD - 
-            (mesh.getNodeTime() % (BLINK_PERIOD*1000))/1000);
-      }
-  });
-  userScheduler.addTask(blinkNoNodes);
-  blinkNoNodes.enable();
-
-  randomSeed(analogRead(A0));
+	// add a broadcast peer
+	initBroadcastSlave();
 }
 
+
+uint8_t count = 0;
 void loop() {
-  mesh.update();
-  digitalWrite(LED, !onFlag);
-}
+	// In the loop we scan for slave
+	sendData(count++);
 
-void sendMessage() {
-  String msg = "Hello from node ";
-  msg += mesh.getNodeId();
-  msg += " myFreeMemory: " + String(ESP.getFreeHeap());
-  mesh.sendBroadcast(msg);
-
-  if (calc_delay) {
-    SimpleList<uint32_t>::iterator node = nodes.begin();
-    while (node != nodes.end()) {
-      mesh.startDelayMeas(*node);
-      node++;
-    }
-    calc_delay = false;
-  }
-
-  Serial.printf("Sending message: %s\n", msg.c_str());
-  
-  taskSendMessage.setInterval( random(TASK_SECOND * 1, TASK_SECOND * 5));  // between 1 and 5 seconds
+	// wait for 3seconds to run the logic again
+	delay(3000);
 }
 
 
-void receivedCallback(uint32_t from, String & msg) {
-  Serial.printf("startHere: Received from %u msg=%s\n", from, msg.c_str());
-}
 
-void newConnectionCallback(uint32_t nodeId) {
-  // Reset blink task
-  onFlag = false;
-  blinkNoNodes.setIterations((mesh.getNodeList().size() + 1) * 2);
-  blinkNoNodes.enableDelayed(BLINK_PERIOD - (mesh.getNodeTime() % (BLINK_PERIOD*1000))/1000);
  
-  Serial.printf("--> startHere: New Connection, nodeId = %u\n", nodeId);
-  Serial.printf("--> startHere: New Connection, %s\n", mesh.subConnectionJson(true).c_str());
-}
-
-void changedConnectionCallback() {
-  Serial.printf("Changed connections\n");
-  // Reset blink task
-  onFlag = false;
-  blinkNoNodes.setIterations((mesh.getNodeList().size() + 1) * 2);
-  blinkNoNodes.enableDelayed(BLINK_PERIOD - (mesh.getNodeTime() % (BLINK_PERIOD*1000))/1000);
- 
-  nodes = mesh.getNodeList();
-
-  Serial.printf("Num nodes: %d\n", nodes.size());
-  Serial.printf("Connection list:");
-
-  SimpleList<uint32_t>::iterator node = nodes.begin();
-  while (node != nodes.end()) {
-    Serial.printf(" %u", *node);
-    node++;
-  }
-  Serial.println();
-  calc_delay = true;
-}
-
-void nodeTimeAdjustedCallback(int32_t offset) {
-  Serial.printf("Adjusted time %u. Offset = %d\n", mesh.getNodeTime(), offset);
-}
-
-void delayReceivedCallback(uint32_t from, int32_t delay) {
-  Serial.printf("Delay to node %u is %d us\n", from, delay);
-}

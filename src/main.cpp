@@ -1,20 +1,23 @@
-
-#include "BluetoothSerial.h"
-#include <painlessMesh.h>
+#include <Arduino.h>
+#include <esp_now.h>
+#include <WiFi.h>
 #include "ELMduino.h"
-#include "Arduino.h"
-
-BluetoothSerial SerialBT;
+#include <BluetoothSerial.h>
 
 #define DEBUG_PORT Serial
 #define ELM_PORT SerialBT
-uint8_t address[6] = {0x00, 0x10, 0xCC, 0x4F, 0x36, 0x03}; // ELM327 MAC CODE
+
+BluetoothSerial SerialBT;
+
+uint8_t elm_address[6] = {0x00, 0x10, 0xCC, 0x4F, 0x36, 0x03}; // ELM327 MAC CODE
+const uint8_t broadcast_address[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+esp_now_peer_info_t slave;
 
 float rpm = 0;
 float speed = 0;
 
 ELM327 myELM327;
-bool connectedOBD = false
+bool connectedOBD = false;
 
 #ifdef LED_BUILTIN
 #define LED LED_BUILTIN
@@ -22,29 +25,162 @@ bool connectedOBD = false
 #define LED 2
 #endif
 
-#define BLINK_PERIOD 3000  // milliseconds until cycle repeat
-#define BLINK_DURATION 100 // milliseconds LED is on for
 
-#define MESH_SSID "VANET"
-#define MESH_PASSWORD "vanet123"
-#define MESH_PORT 5555
 
-    // Prototypes
-void sendMessage();
 
-void receivedCallback(uint32_t from, String &msg);
-void newConnectionCallback(uint32_t nodeId);
-void changedConnectionCallback();
-void nodeTimeAdjustedCallback(int32_t offset);
-void delayReceivedCallback(uint32_t from, int32_t delay);
+// Check if the slave is already paired with the master.
+// If not, pair the slave with master
+bool manageSlave() {
+		Serial.print("Slave Status: ");
+		const esp_now_peer_info_t *peer = &slave;
+		const uint8_t *peer_addr = slave.peer_addr;
+		// check if the peer exists
+		bool exists = esp_now_is_peer_exist(peer_addr);
+		if (exists) {
+			// Slave already paired.
+			Serial.println("Already Paired");
+			return true;
+		}
+		else {
+			// Slave not paired, attempt pair
+			esp_err_t addStatus = esp_now_add_peer(peer);
+			if (addStatus == ESP_OK) {
+				// Pair success
+				Serial.println("Pair success");
+				return true;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_NOT_INIT) {
+				// How did we get so far!!
+				Serial.println("ESPNOW Not Init");
+				return false;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_ARG) {
+				Serial.println("Invalid Argument");
+				return false;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_FULL) {
+				Serial.println("Peer list full");
+				return false;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_NO_MEM) {
+				Serial.println("Out of memory");
+				return false;
+			}
+			else if (addStatus == ESP_ERR_ESPNOW_EXIST) {
+				Serial.println("Peer Exists");
+				return true;
+			}
+			else {
+				Serial.println("Not sure what happened");
+				return false;
+			}
+		}
 
-Scheduler userScheduler; // to control your personal task
-painlessMesh mesh;
+}
 
-bool calc_delay = false;
-SimpleList<uint32_t> nodes;
+void deletePeer() {
+	const esp_now_peer_info_t *peer = &slave;
+	const uint8_t *peer_addr = slave.peer_addr;
+	esp_err_t delStatus = esp_now_del_peer(peer_addr);
+	Serial.print("Slave Delete Status: ");
+	if (delStatus == ESP_OK) {
+		// Delete success
+		Serial.println("Success");
+	}
+	else if (delStatus == ESP_ERR_ESPNOW_NOT_INIT) {
+		// How did we get so far!!
+		Serial.println("ESPNOW Not Init");
+	}
+	else if (delStatus == ESP_ERR_ESPNOW_ARG) {
+		Serial.println("Invalid Argument");
+	}
+	else if (delStatus == ESP_ERR_ESPNOW_NOT_FOUND) {
+		Serial.println("Peer not found.");
+	}
+	else {
+		Serial.println("Not sure what happened");
+	}
+}
 
-Task taskSendMessage(TASK_SECOND * 5, TASK_FOREVER, &sendMessage); // start with a one second interval
+
+// send data
+void sendData(uint8_t counter) {
+	uint8_t data = counter;
+	// const uint8_t *peer_addr = NULL;
+	const uint8_t *peer_addr = slave.peer_addr;
+
+	Serial.print("Sending: "); Serial.println(data);
+	esp_err_t result = esp_now_send(peer_addr, &data, sizeof(data));
+	Serial.print("Send Status: ");
+	if (result == ESP_OK) {
+		Serial.println("Success");
+	}
+	else if (result == ESP_ERR_ESPNOW_NOT_INIT) {
+		// How did we get so far!!
+		Serial.println("ESPNOW not Init.");
+	}
+	else if (result == ESP_ERR_ESPNOW_ARG) {
+		Serial.println("Invalid Argument");
+	}
+	else if (result == ESP_ERR_ESPNOW_INTERNAL) {
+		Serial.println("Internal Error");
+	}
+	else if (result == ESP_ERR_ESPNOW_NO_MEM) {
+		Serial.println("ESP_ERR_ESPNOW_NO_MEM");
+	}
+	else if (result == ESP_ERR_ESPNOW_NOT_FOUND) {
+		Serial.println("Peer not found.");
+	}
+	else {
+		Serial.println("Not sure what happened");
+	}
+}
+
+// callback when data is sent from Master to Slave
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+	char macStr[18];
+	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+		mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+	Serial.print("Last Packet Sent to: "); Serial.println(macStr);
+	Serial.print("Last Packet Send Status: "); Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+
+// callback when data is recv from Master
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+	char macStr[18];
+	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+		mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+	Serial.print("Last Packet Recv from: "); Serial.println(macStr);
+	Serial.print("Last Packet Recv Data: "); Serial.println(*data);
+	Serial.println("");
+}
+
+// Init ESP Now with fallback
+void InitESPNow() {
+	if (esp_now_init() == ESP_OK) {
+		Serial.println("ESPNow Init Success");
+	}
+	else {
+		Serial.println("ESPNow Init Failed");
+		// Retry InitESPNow, add a counte and then restart?
+		// InitESPNow();
+		// or Simply Restart
+		ESP.restart();
+	}
+}
+void initBroadcastSlave() {
+	// clear slave data
+	memset(&slave, 0, sizeof(slave));
+	for (int ii = 0; ii < 6; ++ii) {
+		slave.peer_addr[ii] = (uint8_t)0xff;
+	}
+	slave.encrypt = 0; // no encryption
+	manageSlave();
+}
+
+
+
+//Task taskSendMessage(TASK_SECOND * 5, TASK_FOREVER, &sendMessage); // start with a one second interval
 
 void setup()
 {
@@ -53,31 +189,31 @@ void setup()
   ELM_PORT.begin("ESP32test", true);
   ELM_PORT.setPin("1234");
 
-  DEBUG_PORT.println("Attempting to connect to ELM327...");
+  WiFi.mode(WIFI_STA);
 
-  if (!ELM_PORT.connect(address))
+  if (!ELM_PORT.connect(elm_address))
   {
     DEBUG_PORT.println("Couldn't connect to ELM327");
   }
   else
   {
     myELM327.begin(ELM_PORT, false, 2000);
-    connectedOBD = true DEBUG_PORT.println("Connected to ELM327");
+    connectedOBD = true;
+    DEBUG_PORT.println("Connected to ELM327");
   }
 
   pinMode(LED, OUTPUT);
 
-  mesh.setDebugMsgTypes(ERROR | DEBUG); // set before init() so that you can see error messages
+	InitESPNow();
+	// Once ESPNow is successfully Init, we will register for Send CB to
+	// get the status of Trasnmitted packet
+	esp_now_register_send_cb(OnDataSent);
+	esp_now_register_recv_cb(OnDataRecv);
 
-  mesh.init(MESH_SSID, MESH_PASSWORD, &userScheduler, MESH_PORT);
-  mesh.onReceive(&receivedCallback);
-  mesh.onNewConnection(&newConnectionCallback);
-  mesh.onChangedConnections(&changedConnectionCallback);
-  mesh.onNodeTimeAdjusted(&nodeTimeAdjustedCallback);
-  mesh.onNodeDelayReceived(&delayReceivedCallback);
+	// add a broadcast peer
+	initBroadcastSlave();
 
-  userScheduler.addTask(taskSendMessage);
-  taskSendMessage.enable();
+
 }
 
 void loop()
@@ -89,73 +225,12 @@ void loop()
     rpm = (uint32_t)tempRPM;
     DEBUG_PORT.print("RPM: ");
     DEBUG_PORT.println(rpm);
+    sendData(rpm);
   }
   else if (myELM327.nb_rx_state != ELM_GETTING_MSG)
   {
     myELM327.printError();
   }
 
-  mesh.update();
 }
 
-void sendMessage()
-{
-  //Message format: <connected with obd>/<speed>/<rpm>/<id>
-  String msg = String(connectedOBD) + "/" + String(speed) "/" + String(rpm) "/" + mesh.getNodeId()
-  mesh.sendBroadcast(msg);
-
-
-  if (calc_delay)
-  {
-    SimpleList<uint32_t>::iterator node = nodes.begin();
-    while (node != nodes.end())
-    {
-      mesh.startDelayMeas(*node);
-      node++;
-    }
-    calc_delay = false;
-  }
-
-  DEBUG_PORT.printf("Sending message: %s\n", msg.c_str());
-
-  taskSendMessage.setInterval(random(TASK_SECOND * 1, TASK_SECOND * 5)); // between 1 and 5 seconds
-}
-
-void receivedCallback(uint32_t from, String &msg)
-{
-  DEBUG_PORT.printf("Received from %u msg=%s\n", from, msg.c_str());
-}
-
-void newConnectionCallback(uint32_t nodeId)
-{
-  DEBUG_PORT.printf("New Connection, nodeId = %u, %s", nodeId, mesh.subConnectionJson(true).c_str());
-}
-
-void changedConnectionCallback()
-{
-  DEBUG_PORT.printf("Changed connections\n");
-  
-  nodes = mesh.getNodeList();
-
-  DEBUG_PORT.printf("Num nodes: %d\n", nodes.size());
-  DEBUG_PORT.printf("Connection list:");
-
-  SimpleList<uint32_t>::iterator node = nodes.begin();
-  while (node != nodes.end())
-  {
-    DEBUG_PORT.printf(" %u", *node);
-    node++;
-  }
-  DEBUG_PORT.println();
-  calc_delay = true;
-}
-
-void nodeTimeAdjustedCallback(int32_t offset)
-{
-  DEBUG_PORT.printf("Adjusted time %u. Offset = %d\n", mesh.getNodeTime(), offset);
-}
-
-void delayReceivedCallback(uint32_t from, int32_t delay)
-{
-  DEBUG_PORT.printf("Delay to node %u is %d us\n", from, delay);
-}

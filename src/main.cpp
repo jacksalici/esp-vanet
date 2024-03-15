@@ -17,7 +17,7 @@ ELM327 myELM327;
 #endif
 
 const uint8_t broadcast_address[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-esp_now_peer_info_t slave;
+esp_now_peer_info_t broadcast_peer;
 
 float rpm = 0;
 float speed = 0;
@@ -29,7 +29,7 @@ bool coded(esp_err_t code){
 	switch (code)
 	{
 	case ESP_OK:
-		Serial.println("Pair success");
+		Serial.println("Success");
 		ret = true;
 		break;
 
@@ -66,25 +66,23 @@ bool coded(esp_err_t code){
 	return false;
 }
 
-bool manageSlave()
+bool addPeer()
 {
-	const esp_now_peer_info_t *peer = &slave;
+	const esp_now_peer_info_t *peer = &broadcast_peer;
 	return coded(esp_now_add_peer(peer));	
 }
 
 void deletePeer()
 {
-	const esp_now_peer_info_t *peer = &slave;
-	const uint8_t *peer_addr = slave.peer_addr;
+	const uint8_t *peer_addr = broadcast_peer.peer_addr;
 	coded(esp_now_del_peer(peer_addr));
 }
 
-// send data
 void sendData(uint8_t counter)
 {
 	uint8_t data = counter;
 	// const uint8_t *peer_addr = NULL;
-	const uint8_t *peer_addr = slave.peer_addr;
+	const uint8_t *peer_addr = broadcast_peer.peer_addr;
 
 	Serial.print("Sending: ");
 	Serial.println(data);
@@ -93,8 +91,7 @@ void sendData(uint8_t counter)
 	coded(result);
 }
 
-// callback when data is sent from Master to Slave
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
+void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
 	char macStr[18];
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -105,8 +102,7 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 	Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
-// callback when data is recv from Master
-void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
+void onDataReceived(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 {
 	char macStr[18];
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -118,8 +114,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 	Serial.println("");
 }
 
-// Init ESP Now with fallback
-void InitESPNow()
+void initESPNow()
 {
 	if (esp_now_init() == ESP_OK)
 	{
@@ -128,25 +123,20 @@ void InitESPNow()
 	else
 	{
 		Serial.println("ESPNow Init Failed");
-		// Retry InitESPNow, add a counte and then restart?
-		// InitESPNow();
-		// or Simply Restart
 		ESP.restart();
 	}
 }
-void initBroadcastSlave()
+void initBroadcastPeer()
 {
 	// clear slave data
-	memset(&slave, 0, sizeof(slave));
-	for (int ii = 0; ii < 6; ++ii)
-	{
-		slave.peer_addr[ii] = (uint8_t)0xff;
-	}
-	slave.encrypt = 0; // no encryption
-	manageSlave();
+	memset(&broadcast_peer, 0, sizeof(broadcast_peer));
+	memcpy(broadcast_peer.peer_addr, broadcast_address, 6*sizeof(uint8_t));
+	broadcast_peer.encrypt = 0; // no encryption
+	addPeer();
 }
 
 // Task taskSendMessage(TASK_SECOND * 5, TASK_FOREVER, &sendMessage); // start with a one second interval
+long lastSent = 0;
 
 void setup()
 {
@@ -176,14 +166,12 @@ void setup()
 
 	WiFi.mode(WIFI_STA);
 
-	InitESPNow();
-	// Once ESPNow is successfully Init, we will register for Send CB to
-	// get the status of Trasnmitted packet
-	esp_now_register_send_cb(OnDataSent);
-	esp_now_register_recv_cb(OnDataRecv);
+	initESPNow();
 
-	// add a broadcast peer
-	initBroadcastSlave();
+	esp_now_register_send_cb(onDataSent);
+	esp_now_register_recv_cb(onDataReceived);
+
+	initBroadcastPeer();
 }
 
 void loop()
@@ -207,5 +195,9 @@ void loop()
 		}
 	}
 #endif
+
+if(millis()>lastSent+1000){
 	sendData(0x00);
+	lastSent = millis();
+}
 }

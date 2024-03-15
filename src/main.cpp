@@ -1,109 +1,82 @@
 #include <Arduino.h>
 #include <esp_now.h>
 #include <WiFi.h>
-#include "ELMduino.h"
-#include <BluetoothSerial.h>
 
 #define DEBUG_PORT Serial
+
+#if CHIP_ESP32
+#include "ELMduino.h"
+#include <BluetoothSerial.h>
 #define ELM_PORT SerialBT
 
 BluetoothSerial SerialBT;
 
 uint8_t elm_address[6] = {0x00, 0x10, 0xCC, 0x4F, 0x36, 0x03}; // ELM327 MAC CODE
+ELM327 myELM327;
+
+#endif
+
 const uint8_t broadcast_address[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 esp_now_peer_info_t slave;
 
 float rpm = 0;
 float speed = 0;
 
-ELM327 myELM327;
 bool connectedOBD = false;
+
+bool coded(esp_err_t code){
+	bool ret = false;
+	switch (code)
+	{
+	case ESP_OK:
+		Serial.println("Pair success");
+		ret = true;
+		break;
+
+	case ESP_ERR_ESPNOW_NOT_INIT:
+		Serial.println("ESPNOW Not Init");
+		break;
+
+	case ESP_ERR_ESPNOW_ARG:
+		Serial.println("Invalid Argument");
+		break;
+
+	case ESP_ERR_ESPNOW_FULL:
+		Serial.println("Peer list full");
+		break;
+		
+	case ESP_ERR_ESPNOW_NO_MEM:
+		Serial.println("Out of memory");
+		break;
+	
+	case ESP_ERR_ESPNOW_NOT_FOUND:
+		Serial.println("Peer not found.");
+		break;
+
+	case ESP_ERR_ESPNOW_EXIST:
+		Serial.println("Peer Exists");
+		ret = true;
+		break;
+
+	default:
+		Serial.println("Not sure what happened");
+		break;
+	}
+
+	return false;
+}
 
 bool manageSlave()
 {
-	Serial.print("Slave Status: ");
 	const esp_now_peer_info_t *peer = &slave;
-	const uint8_t *peer_addr = slave.peer_addr;
-	// check if the peer exists
-	bool exists = esp_now_is_peer_exist(peer_addr);
-	if (exists)
-	{
-		// Slave already paired.
-		Serial.println("Already Paired");
-		return true;
-	}
-	else
-	{
-		// Slave not paired, attempt pair
-		esp_err_t addStatus = esp_now_add_peer(peer);
-		if (addStatus == ESP_OK)
-		{
-			// Pair success
-			Serial.println("Pair success");
-			return true;
-		}
-		else if (addStatus == ESP_ERR_ESPNOW_NOT_INIT)
-		{
-			// How did we get so far!!
-			Serial.println("ESPNOW Not Init");
-			return false;
-		}
-		else if (addStatus == ESP_ERR_ESPNOW_ARG)
-		{
-			Serial.println("Invalid Argument");
-			return false;
-		}
-		else if (addStatus == ESP_ERR_ESPNOW_FULL)
-		{
-			Serial.println("Peer list full");
-			return false;
-		}
-		else if (addStatus == ESP_ERR_ESPNOW_NO_MEM)
-		{
-			Serial.println("Out of memory");
-			return false;
-		}
-		else if (addStatus == ESP_ERR_ESPNOW_EXIST)
-		{
-			Serial.println("Peer Exists");
-			return true;
-		}
-		else
-		{
-			Serial.println("Not sure what happened");
-			return false;
-		}
-	}
+	return coded(esp_now_add_peer(peer));	
 }
 
 void deletePeer()
 {
 	const esp_now_peer_info_t *peer = &slave;
 	const uint8_t *peer_addr = slave.peer_addr;
-	esp_err_t delStatus = esp_now_del_peer(peer_addr);
-	Serial.print("Slave Delete Status: ");
-	if (delStatus == ESP_OK)
-	{
-		// Delete success
-		Serial.println("Success");
-	}
-	else if (delStatus == ESP_ERR_ESPNOW_NOT_INIT)
-	{
-		// How did we get so far!!
-		Serial.println("ESPNOW Not Init");
-	}
-	else if (delStatus == ESP_ERR_ESPNOW_ARG)
-	{
-		Serial.println("Invalid Argument");
-	}
-	else if (delStatus == ESP_ERR_ESPNOW_NOT_FOUND)
-	{
-		Serial.println("Peer not found.");
-	}
-	else
-	{
-		Serial.println("Not sure what happened");
-	}
+	coded(esp_now_del_peer(peer_addr));
 }
 
 // send data
@@ -117,35 +90,7 @@ void sendData(uint8_t counter)
 	Serial.println(data);
 	esp_err_t result = esp_now_send(peer_addr, &data, sizeof(data));
 	Serial.print("Send Status: ");
-	if (result == ESP_OK)
-	{
-		Serial.println("Success");
-	}
-	else if (result == ESP_ERR_ESPNOW_NOT_INIT)
-	{
-		// How did we get so far!!
-		Serial.println("ESPNOW not Init.");
-	}
-	else if (result == ESP_ERR_ESPNOW_ARG)
-	{
-		Serial.println("Invalid Argument");
-	}
-	else if (result == ESP_ERR_ESPNOW_INTERNAL)
-	{
-		Serial.println("Internal Error");
-	}
-	else if (result == ESP_ERR_ESPNOW_NO_MEM)
-	{
-		Serial.println("ESP_ERR_ESPNOW_NO_MEM");
-	}
-	else if (result == ESP_ERR_ESPNOW_NOT_FOUND)
-	{
-		Serial.println("Peer not found.");
-	}
-	else
-	{
-		Serial.println("Not sure what happened");
-	}
+	coded(result);
 }
 
 // callback when data is sent from Master to Slave
@@ -207,10 +152,11 @@ void setup()
 {
 
 	DEBUG_PORT.begin(115200);
-	ELM_PORT.begin("ESP32test", true);
-	ELM_PORT.setPin("1234");
 
-	WiFi.mode(WIFI_STA);
+#if CHIP_ESP32
+
+	ELM_PORT.begin("ESP32", true);
+	ELM_PORT.setPin("1234");
 
 	if (!ELM_PORT.connect(elm_address))
 	{
@@ -222,6 +168,13 @@ void setup()
 		connectedOBD = true;
 		DEBUG_PORT.println("Connected to ELM327");
 	}
+
+#else
+	DEBUG_PORT.println("Bluetooth not defined, ELM327 not connected");
+
+#endif
+
+	WiFi.mode(WIFI_STA);
 
 	InitESPNow();
 	// Once ESPNow is successfully Init, we will register for Send CB to
@@ -235,17 +188,24 @@ void setup()
 
 void loop()
 {
-	float tempRPM = myELM327.rpm();
+#if CHIP_ESP32
 
-	if (myELM327.nb_rx_state == ELM_SUCCESS)
+	if (connectedOBD)
 	{
-		rpm = (uint32_t)tempRPM;
-		DEBUG_PORT.print("RPM: ");
-		DEBUG_PORT.println(rpm);
-		sendData(rpm);
+		float tempRPM = myELM327.rpm();
+
+		if (myELM327.nb_rx_state == ELM_SUCCESS)
+		{
+			rpm = (uint32_t)tempRPM;
+			DEBUG_PORT.print("RPM: ");
+			DEBUG_PORT.println(rpm);
+			sendData(rpm);
+		}
+		else if (myELM327.nb_rx_state != ELM_GETTING_MSG)
+		{
+			myELM327.printError();
+		}
 	}
-	else if (myELM327.nb_rx_state != ELM_GETTING_MSG)
-	{
-		myELM327.printError();
-	}
+#endif
+	sendData(0x00);
 }

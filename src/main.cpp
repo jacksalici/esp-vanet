@@ -4,6 +4,23 @@
 
 #define DEBUG_PORT Serial
 
+
+typedef struct CAM{
+	uint8_t address [6];
+	uint8_t coordinates [3];
+	float speed;
+} CAM;
+
+typedef struct DENM{
+	uint8_t address [6];
+	uint8_t coordinates [3];
+	float speed;
+	uint8_t severity;
+} DENM;
+
+CAM ca_message;
+DENM den_message;
+
 #if CHIP_ESP32
 #include "ELMduino.h"
 #include <BluetoothSerial.h>
@@ -81,7 +98,6 @@ void deletePeer()
 void sendData(uint8_t counter)
 {
 	uint8_t data = counter;
-	// const uint8_t *peer_addr = NULL;
 	const uint8_t *peer_addr = broadcast_peer.peer_addr;
 
 	Serial.print("Sending: ");
@@ -172,6 +188,21 @@ void setup()
 	esp_now_register_recv_cb(onDataReceived);
 
 	initBroadcastPeer();
+
+	//init MAC and DENM messages
+	esp_read_mac(ca_message.address, ESP_MAC_WIFI_SOFTAP);
+	
+	const uint8_t a[3] = {0, 0, 0};
+	memcpy(ca_message.coordinates, a, 3);
+	ca_message.speed = 0;
+
+	esp_read_mac(den_message.address, ESP_MAC_WIFI_SOFTAP);
+	
+	const uint8_t a[3] = {0, 0, 0};
+	memcpy(den_message.coordinates, a, 3);
+	den_message.speed = 0;
+	den_message.severity = 0;
+	
 }
 
 void loop()

@@ -4,6 +4,13 @@
 
 #define DEBUG_PORT Serial
 
+template <typename T>
+Print& operator<<(Print& printer, T value)
+{
+    printer.print(value);
+    return printer;
+}
+
 
 typedef struct CAM{
 	uint8_t address [6];
@@ -46,37 +53,37 @@ bool coded(esp_err_t code){
 	switch (code)
 	{
 	case ESP_OK:
-		Serial.println("Success");
+		DEBUG_PORT.println("Success");
 		ret = true;
 		break;
 
 	case ESP_ERR_ESPNOW_NOT_INIT:
-		Serial.println("ESPNOW Not Init");
+		DEBUG_PORT.println("ESPNOW Not Init");
 		break;
 
 	case ESP_ERR_ESPNOW_ARG:
-		Serial.println("Invalid Argument");
+		DEBUG_PORT.println("Invalid Argument");
 		break;
 
 	case ESP_ERR_ESPNOW_FULL:
-		Serial.println("Peer list full");
+		DEBUG_PORT.println("Peer list full");
 		break;
 		
 	case ESP_ERR_ESPNOW_NO_MEM:
-		Serial.println("Out of memory");
+		DEBUG_PORT.println("Out of memory");
 		break;
 	
 	case ESP_ERR_ESPNOW_NOT_FOUND:
-		Serial.println("Peer not found.");
+		DEBUG_PORT.println("Peer not found.");
 		break;
 
 	case ESP_ERR_ESPNOW_EXIST:
-		Serial.println("Peer Exists");
+		DEBUG_PORT.println("Peer Exists");
 		ret = true;
 		break;
 
 	default:
-		Serial.println("Not sure what happened");
+		DEBUG_PORT.println("Not sure what happened");
 		break;
 	}
 
@@ -95,16 +102,13 @@ void deletePeer()
 	coded(esp_now_del_peer(peer_addr));
 }
 
-void sendData(uint8_t counter)
+void sendData(uint8_t data)
 {
-	uint8_t data = counter;
 	const uint8_t *peer_addr = broadcast_peer.peer_addr;
-
-	Serial.print("Sending: ");
-	Serial.println(data);
 	esp_err_t result = esp_now_send(peer_addr, &data, sizeof(data));
-	Serial.print("Send Status: ");
-	coded(result);
+	
+
+	DEBUG_PORT << "Packet outgoing. Content: " << data << ". \t Status" << coded(result) << "\n";
 }
 
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
@@ -112,10 +116,8 @@ void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 	char macStr[18];
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
 			 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-	Serial.print("Last Packet Sent to: ");
-	Serial.println(macStr);
-	Serial.print("Last Packet Send Status: ");
-	Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+
+	DEBUG_PORT << "Packet sent to " << macStr << ". \t" << (status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail") << "\n";
 }
 
 void onDataReceived(const uint8_t *mac_addr, const uint8_t *data, int data_len)
@@ -123,22 +125,19 @@ void onDataReceived(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 	char macStr[18];
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
 			 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-	Serial.print("Last Packet Recv from: ");
-	Serial.println(macStr);
-	Serial.print("Last Packet Recv Data: ");
-	Serial.println(*data);
-	Serial.println("");
+	DEBUG_PORT << "Packet received from " << macStr << ". \t" << *data << "\n";
+	
 }
 
 void initESPNow()
 {
 	if (esp_now_init() == ESP_OK)
 	{
-		Serial.println("ESPNow Init Success");
+		DEBUG_PORT<<"ESPNow Init Success\n";
 	}
 	else
 	{
-		Serial.println("ESPNow Init Failed");
+		DEBUG_PORT<<"ESPNow Init Failed\n";
 		ESP.restart();
 	}
 }
@@ -176,7 +175,7 @@ void setup()
 	}
 
 #else
-	DEBUG_PORT.println("Bluetooth not defined, ELM327 not connected");
+	DEBUG_PORT<<"Bluetooth not defined, ELM327 not connected\n";
 
 #endif
 
@@ -198,7 +197,6 @@ void setup()
 
 	esp_read_mac(den_message.address, ESP_MAC_WIFI_SOFTAP);
 	
-	const uint8_t a[3] = {0, 0, 0};
 	memcpy(den_message.coordinates, a, 3);
 	den_message.speed = 0;
 	den_message.severity = 0;

@@ -11,22 +11,16 @@ Print& operator<<(Print& printer, T value)
     return printer;
 }
 
+enum type_message: uint8_t { CAM = 0, DEMN = 1};
 
-typedef struct CAM{
+typedef struct message{
+	type_message type;
 	uint8_t address [6];
 	uint8_t coordinates [3];
-	float speed;
-} CAM;
-
-typedef struct DENM{
-	uint8_t address [6];
-	uint8_t coordinates [3];
-	float speed;
+	int32_t speed;
 	uint8_t severity;
-} DENM;
+} message;
 
-CAM ca_message;
-DENM den_message;
 
 #if CHIP_ESP32
 #include "ELMduino.h"
@@ -43,8 +37,6 @@ ELM327 myELM327;
 const uint8_t broadcast_address[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 esp_now_peer_info_t broadcast_peer;
 
-float rpm = 0;
-float speed = 0;
 
 bool connectedOBD = false;
 
@@ -53,38 +45,37 @@ bool coded(esp_err_t code){
 	switch (code)
 	{
 	case ESP_OK:
-		DEBUG_PORT.println("Success");
+		DEBUG_PORT<<"Success\n";
 		ret = true;
 		break;
 
 	case ESP_ERR_ESPNOW_NOT_INIT:
-		DEBUG_PORT.println("ESPNOW Not Init");
+		DEBUG_PORT<<"ESPNOW Not Init\n";
 		break;
 
 	case ESP_ERR_ESPNOW_ARG:
-		DEBUG_PORT.println("Invalid Argument");
+		DEBUG_PORT<<"Invalid Argument\n";
 		break;
 
 	case ESP_ERR_ESPNOW_FULL:
-		DEBUG_PORT.println("Peer list full");
+		DEBUG_PORT<<"Peer list full\n";
 		break;
 		
 	case ESP_ERR_ESPNOW_NO_MEM:
-		DEBUG_PORT.println("Out of memory");
+		DEBUG_PORT<<"Out of memory\n";
 		break;
 	
 	case ESP_ERR_ESPNOW_NOT_FOUND:
-		DEBUG_PORT.println("Peer not found.");
+		DEBUG_PORT<<"Peer not found.\n";
 		break;
 
 	case ESP_ERR_ESPNOW_EXIST:
-		DEBUG_PORT.println("Peer Exists");
+		DEBUG_PORT<<"Peer Exists\n";
 		ret = true;
 		break;
 
 	default:
-		DEBUG_PORT.println("Not sure what happened");
-		break;
+		DEBUG_PORT<<"Not sure what happened\n";
 	}
 
 	return false;
@@ -102,13 +93,53 @@ void deletePeer()
 	coded(esp_now_del_peer(peer_addr));
 }
 
-void sendData(uint8_t data)
+void sendData(message data)
 {
 	const uint8_t *peer_addr = broadcast_peer.peer_addr;
-	esp_err_t result = esp_now_send(peer_addr, &data, sizeof(data));
+	esp_err_t result = esp_now_send(peer_addr, (uint8_t*)&data, sizeof(data));
 	
 
-	DEBUG_PORT << "Packet outgoing. Content: " << data << ". \t Status" << coded(result) << "\n";
+	DEBUG_PORT << "LOG: Packet outgoing, status: " << coded(result) << "\n";
+}
+
+void sendCAM(uint8_t speed){
+
+	message m;
+	esp_read_mac(m.address, ESP_MAC_WIFI_SOFTAP);
+
+	m.type = CAM;
+	
+	const uint8_t a[3] = {0, 0, 0};
+	memcpy(m.coordinates, a, 3);
+	m.speed = speed;
+	m.severity = 0;
+
+	sendData(m);
+}
+
+void sendDENM(uint8_t speed, uint8_t severity){
+
+	message m;
+	esp_read_mac(m.address, ESP_MAC_WIFI_SOFTAP);
+
+	m.type = CAM;
+	
+	const uint8_t a[3] = {0, 0, 0};
+	memcpy(m.coordinates, a, 3);
+	m.speed = speed;
+	m.severity = severity;
+
+	sendData(m);
+}
+
+void elaborateMessage (const uint8_t *data, int data_len){
+	message* mex =(message*) data;
+
+	char macStr[18];
+	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+			 mex->address[0], mex->address[1], mex->address[2], mex->address[3], mex->address[4], mex->address[5]);
+
+	DEBUG_PORT << "PACKET FROM " << macStr << " - MESSAGE " << mex->type << "\nSPEED " << mex->speed << " SEVERITY: " << mex->severity << "\n";
 }
 
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
@@ -117,7 +148,7 @@ void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
 			 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 
-	DEBUG_PORT << "Packet sent to " << macStr << ". \t" << (status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail") << "\n";
+	DEBUG_PORT << "LOG: Packet sent to " << macStr << ", " << (status == ESP_NOW_SEND_SUCCESS ? "delivery succeded." : "delivery failed.") << "\n";
 }
 
 void onDataReceived(const uint8_t *mac_addr, const uint8_t *data, int data_len)
@@ -125,12 +156,15 @@ void onDataReceived(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 	char macStr[18];
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
 			 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-	DEBUG_PORT << "Packet received from " << macStr << ". \t" << *data << "\n";
+	DEBUG_PORT << "LOG: Packet received from " << macStr << ".\n";
+
+	elaborateMessage(data, data_len);
 	
 }
 
 void initESPNow()
 {
+	DEBUG_PORT<<"LOG: ";
 	if (esp_now_init() == ESP_OK)
 	{
 		DEBUG_PORT<<"ESPNow Init Success\n";
@@ -157,6 +191,8 @@ void setup()
 {
 
 	DEBUG_PORT.begin(115200);
+	DEBUG_PORT<<"LOG: ";
+
 
 #if CHIP_ESP32
 
@@ -165,13 +201,13 @@ void setup()
 
 	if (!ELM_PORT.connect(elm_address))
 	{
-		DEBUG_PORT.println("Couldn't connect to ELM327");
+		DEBUG_PORT<<"Couldn't connect to ELM327\n";
 	}
 	else
 	{
 		myELM327.begin(ELM_PORT, false, 2000);
 		connectedOBD = true;
-		DEBUG_PORT.println("Connected to ELM327");
+		DEBUG_PORT<<"Connected to ELM327\n";
 	}
 
 #else
@@ -186,37 +222,19 @@ void setup()
 	esp_now_register_send_cb(onDataSent);
 	esp_now_register_recv_cb(onDataReceived);
 
-	initBroadcastPeer();
-
-	//init MAC and DENM messages
-	esp_read_mac(ca_message.address, ESP_MAC_WIFI_SOFTAP);
-	
-	const uint8_t a[3] = {0, 0, 0};
-	memcpy(ca_message.coordinates, a, 3);
-	ca_message.speed = 0;
-
-	esp_read_mac(den_message.address, ESP_MAC_WIFI_SOFTAP);
-	
-	memcpy(den_message.coordinates, a, 3);
-	den_message.speed = 0;
-	den_message.severity = 0;
-	
+	initBroadcastPeer();	
 }
-
 void loop()
 {
 #if CHIP_ESP32
 
 	if (connectedOBD)
 	{
-		float tempRPM = myELM327.rpm();
+		int32_t tempKPH = myELM327.kph();
 
 		if (myELM327.nb_rx_state == ELM_SUCCESS)
 		{
-			rpm = (uint32_t)tempRPM;
-			DEBUG_PORT.print("RPM: ");
-			DEBUG_PORT.println(rpm);
-			sendData(rpm);
+			sendCAM(tempKPH);
 		}
 		else if (myELM327.nb_rx_state != ELM_GETTING_MSG)
 		{
@@ -225,8 +243,8 @@ void loop()
 	}
 #endif
 
-if(millis()>lastSent+1000){
-	sendData(0x00);
+if(millis()>lastSent+500+random(5000)){
+	sendCAM(0x02);
 	lastSent = millis();
 }
 }

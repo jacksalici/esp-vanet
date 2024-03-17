@@ -17,8 +17,9 @@ typedef struct message{
 	type_message type;
 	uint8_t address [6];
 	uint8_t coordinates [3];
-	int32_t speed;
 	uint8_t severity;
+	uint8_t speed;
+	
 } message;
 
 
@@ -78,13 +79,13 @@ bool coded(esp_err_t code){
 		DEBUG_PORT<<"Not sure what happened\n";
 	}
 
-	return false;
+	return ret;
 }
 
-bool addPeer()
+void addPeer()
 {
 	const esp_now_peer_info_t *peer = &broadcast_peer;
-	return coded(esp_now_add_peer(peer));	
+	coded(esp_now_add_peer(peer));	
 }
 
 void deletePeer()
@@ -99,7 +100,8 @@ void sendData(message data)
 	esp_err_t result = esp_now_send(peer_addr, (uint8_t*)&data, sizeof(data));
 	
 
-	DEBUG_PORT << "LOG: Packet outgoing, status: " << coded(result) << "\n";
+	DEBUG_PORT << "LOG: Packet outgoing, status: ";
+	coded(result);
 }
 
 void sendCAM(uint8_t speed){
@@ -139,7 +141,7 @@ void elaborateMessage (const uint8_t *data, int data_len){
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
 			 mex->address[0], mex->address[1], mex->address[2], mex->address[3], mex->address[4], mex->address[5]);
 
-	DEBUG_PORT << "PACKET FROM " << macStr << " - MESSAGE " << mex->type << "\nSPEED " << mex->speed << " SEVERITY: " << mex->severity << "\n";
+	DEBUG_PORT << ( mex->type == 0 ? "DEN MESSAGE" : "CA MESSAGE") << " PACKET FROM " << macStr << " - SPEED " << mex->speed << " - SEVERITY: " << mex->severity << "\n";
 }
 
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
@@ -186,6 +188,10 @@ void initBroadcastPeer()
 
 // Task taskSendMessage(TASK_SECOND * 5, TASK_FOREVER, &sendMessage); // start with a one second interval
 long lastSent = 0;
+long lastSpeedTime = 0;
+uint8_t lastSpeedValue = 0;
+
+short gForseKPH = 9.8*3.6;
 
 void setup()
 {
@@ -234,7 +240,7 @@ void loop()
 
 		if (myELM327.nb_rx_state == ELM_SUCCESS)
 		{
-			sendCAM(tempKPH);
+			sendCAM((uint8_t)tempKPH);
 		}
 		else if (myELM327.nb_rx_state != ELM_GETTING_MSG)
 		{
@@ -243,7 +249,7 @@ void loop()
 	}
 #endif
 
-if(millis()>lastSent+500+random(5000)){
+if (millis()>lastSent+500+random(5000)){
 	sendCAM(0x02);
 	lastSent = millis();
 }

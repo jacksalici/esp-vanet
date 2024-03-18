@@ -191,7 +191,10 @@ long lastSent = 0;
 long lastSpeedTime = 0;
 uint8_t lastSpeedValue = 0;
 
-short gForseKPH = 9.8*3.6;
+short gForceKPH = 9.8*3.6;
+uint8_t distanceThreshold = 4;
+
+
 
 void setup()
 {

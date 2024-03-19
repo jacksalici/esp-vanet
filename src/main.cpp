@@ -24,6 +24,7 @@ typedef struct message
 	uint8_t coordinates[3];
 	uint8_t severity;
 	uint8_t speed;
+	uint8_t debug;
 
 } message;
 
@@ -44,8 +45,11 @@ esp_now_peer_info_t broadcast_peer;
 
 bool connectedOBD = false;
 
-bool coded(esp_err_t code)
+bool coded(esp_err_t code, String str = "")
 {
+	if (str!=""){
+		DEBUG_PORT << "LOG: " << str << ": ";
+	}
 	bool ret = false;
 	switch (code)
 	{
@@ -89,13 +93,13 @@ bool coded(esp_err_t code)
 void addPeer()
 {
 	const esp_now_peer_info_t *peer = &broadcast_peer;
-	coded(esp_now_add_peer(peer));
+	coded(esp_now_add_peer(peer), "Peering added");
 }
 
 void deletePeer()
 {
 	const uint8_t *peer_addr = broadcast_peer.peer_addr;
-	coded(esp_now_del_peer(peer_addr));
+	coded(esp_now_del_peer(peer_addr), "Peering deleted");
 }
 
 void sendData(message data)
@@ -103,11 +107,10 @@ void sendData(message data)
 	const uint8_t *peer_addr = broadcast_peer.peer_addr;
 	esp_err_t result = esp_now_send(peer_addr, (uint8_t *)&data, sizeof(data));
 
-	DEBUG_PORT << "LOG: Packet outgoing, status: ";
-	coded(result);
+	coded(result, "Packet outgoing, status");
 }
 
-void sendCAM(uint8_t speed)
+void sendCAM(uint8_t speed, uint8_t debug = 0x00)
 {
 
 	message m;
@@ -119,11 +122,12 @@ void sendCAM(uint8_t speed)
 	memcpy(m.coordinates, a, 3);
 	m.speed = speed;
 	m.severity = 0;
+	m.debug = debug;
 
 	sendData(m);
 }
 
-void sendDENM(uint8_t speed, uint8_t severity)
+void sendDENM(uint8_t speed, uint8_t severity, uint8_t debug = 0x00)
 {
 
 	message m;
@@ -135,6 +139,8 @@ void sendDENM(uint8_t speed, uint8_t severity)
 	memcpy(m.coordinates, a, 3);
 	m.speed = speed;
 	m.severity = severity;
+	m.debug = debug;
+
 
 	sendData(m);
 }
@@ -147,7 +153,7 @@ void elaborateMessage(const uint8_t *data, int data_len)
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
 			 mex->address[0], mex->address[1], mex->address[2], mex->address[3], mex->address[4], mex->address[5]);
 
-	DEBUG_PORT << (mex->type == 0 ? "DEN MESSAGE" : "CA MESSAGE") << " PACKET FROM " << macStr << " - SPEED " << mex->speed << " - SEVERITY: " << mex->severity << "\n";
+	DEBUG_PORT << (mex->type == 0 ? "DEN MESSAGE" : "CA MESSAGE") << " PACKET FROM " << macStr << " - SPEED " << mex->speed << " - SEVERITY: " << mex->severity << (mex->debug == 0x01 ? " DEBUG MODE\n" : "\n");
 }
 
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
@@ -277,7 +283,7 @@ void loop()
 		}
 		else
 		{ // debug
-			sendCAM((uint8_t)random(255));
+			sendCAM((uint8_t)random(255), 0x01);
 		}
 		cam_lastGenMillis = millis();
 	}

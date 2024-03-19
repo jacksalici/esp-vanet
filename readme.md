@@ -1,6 +1,8 @@
 # ESP-VANET 🚒
 
-> **ESP32-based VANET-like inter-vehicular messaging network**
+> **_ESP32-based, VANET-like, inter-vehicular communication network to provide mock ETSI ITS-G5  message, like Cooperative Awareness Messages and Decentralized Environmental Notification Messages, to nearby cars._**
+
+_This was proposed as the final project for the Automotive Connectivity course within my Computer Engineering master's degree._
 
 ![project architecture](misc/architecture.svg)
 
@@ -13,7 +15,7 @@ To achieve those goals, both the US and the EU have made proposals that could le
 
 The ESP32 is a low-cost low-power microcontroller family by Espressif very popular in the industry due to its high efficiency and versatility. Besides the WiFi and Bluetooth standard connectivity, it also offers **ESP-NOW** a wireless communication protocol between microcontrollers.  
 
-This project simulates the CAM and DENM messages using an ESP32 mesh built over ESP-NOW and is aimed to leverage the constraints needed to deploy a system like this, since a generally available MCU and the OBD port - which is already present in all the cars - are the only things needed for the code to work.
+**This project simulates the standard CAM and DENM messages, using an ESP32 mesh built over ESP-NOW; and it is aimed to leverage the constraints needed to deploy a system like this**, since a generally available MCU and the OBD2 port - which is already present in all the cars - are the only things needed for the code to work.
 
 ## Technical Details
 
@@ -42,8 +44,15 @@ On the other hand, CAM messages are sent with a variable frequency (1-10Hz), tha
 
 2. The time elapsed is greater than the provided max value.
 
-For this project the time values are constant and only the second last movement constraint is adopted, this is due to some technical constraints explained below.  
+For this project the time values are constant and only the last movement constraint is adopted, this is due to some technical constraints explained below.  
 
 ### OBD-2 port adaptor
 
-The On Board Diagnostic is 
+The On-Board Diagnostic is a standardized way to provide vehicles with self-diagnostic and reporting capability. It can also be used to read real-time data along with several diagnostic trouble codes. In his second standard version, it is accessible from the _data link connector_ (DLC), a 16-pin D-shaped connector places usually in the instrument panel. Two of these pins are the CAN high and the CAN low, while the others have other purposes such as a 12V battery output voltage.  
+
+To use this port, in this project, an ELM327 chip has been used, since it can abstract the low-level protocol and present it as a simple interface that can be called via a UART or by USB, RS-232, Wi-Fi or, as in this case, via Bluetooth. The 
+queries are managed by the [ELMduino](https://github.com/PowerBroker2/ELMduino) library.  
+
+#### Caveats
+
+Although the OBD-2 port could been reverse-engineered to take several information that change from manufacturer to manufacturer such as steering angles and air-bag crashes, in this project only standard codes are used, so that it remains valid for every car manufacturer. This is the reason why currently only the deceleration is taken into account when DENM are generated.  

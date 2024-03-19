@@ -192,7 +192,8 @@ long lastSpeedTime = 0;
 uint8_t lastSpeedValue = 0;
 
 short gForceKPH = 9.8*3.6;
-uint8_t distanceThreshold = 4;
+short kpmThreshold = 4;
+sh
 
 
 

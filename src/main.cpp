@@ -4,6 +4,7 @@
 #include "esp_wifi.h"
 
 #define FLOODING
+#define DEBUGGING false
 
 static const size_t ESPNOW_MAX_MESSAGE_LENGTH = 250;
 static const uint8_t ESPNOW_ADDR_LEN = 6;
@@ -74,7 +75,7 @@ typedef struct
 
 } message;
 
-#if CHIP_ESP32
+#ifdef CONNECT_EDB
 #include "ELMduino.h"
 #include <BluetoothSerial.h>
 #define ELM_PORT SerialBT
@@ -283,7 +284,7 @@ void setup()
 	DEBUG_PORT.begin(115200);
 	DEBUG_PORT << "LOG: ";
 
-#if CHIP_ESP32
+#ifdef CONNECT_EDB
 
 	ELM_PORT.begin("ESP32", true);
 	ELM_PORT.setPin("1234");
@@ -318,7 +319,7 @@ void setup()
 
 void loop()
 {
-#if CHIP_ESP32
+#ifdef CONNECT_EDB
 
 	if (connectedOBD)
 	{
@@ -351,12 +352,17 @@ void loop()
 		if (connectedOBD)
 		{
 			sendCAM(currentKphValue);
+			cam_lastGenMillis = millis();
 		}
+		#if DEBUGGING
 		else
 		{ // debug
+	
 			sendCAM((uint8_t)random(255), 0x01);
+			cam_lastGenMillis = millis();
 		}
-		cam_lastGenMillis = millis();
+		#endif
+		
 	}
 
 	lastKphValue = currentKphValue;

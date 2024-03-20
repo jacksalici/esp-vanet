@@ -3,42 +3,48 @@
 #include <WiFi.h>
 #include "esp_wifi.h"
 
-static const size_t ESPNOW_MAX_MESSAGE_LENGTH = 250; 
+#define FLOODING
+
+static const size_t ESPNOW_MAX_MESSAGE_LENGTH = 250;
 static const uint8_t ESPNOW_ADDR_LEN = 6;
 
-typedef struct {
-    uint16_t frame_head;
-    uint16_t duration;
-    uint8_t destination_address[6];
-    uint8_t source_address[6];
-    uint8_t broadcast_address[6];
-    uint16_t sequence_control;
+typedef struct
+{
+	uint16_t frame_head;
+	uint16_t duration;
+	uint8_t destination_address[6];
+	uint8_t source_address[6];
+	uint8_t broadcast_address[6];
+	uint16_t sequence_control;
 
-    uint8_t category_code;
-    uint8_t organization_identifier[3]; 
-    uint8_t random_values[4];
-    struct {
-        uint8_t element_id;                 
-        uint8_t lenght;                     
-        uint8_t organization_identifier[3]; 
-        uint8_t type;                       
-        uint8_t version;
-        uint8_t body[0];
-    } vendor_specific_content;
-} __attribute__ ((packed)) espnow_frame_format_t;
+	uint8_t category_code;
+	uint8_t organization_identifier[3];
+	uint8_t random_values[4];
+	struct
+	{
+		uint8_t element_id;
+		uint8_t lenght;
+		uint8_t organization_identifier[3];
+		uint8_t type;
+		uint8_t version;
+		uint8_t body[0];
+	} vendor_specific_content;
+} __attribute__((packed)) espnow_frame_format_t;
 
-typedef struct {
-    uint8_t dstAddress[6];
-    uint8_t payload[ESPNOW_MAX_MESSAGE_LENGTH]; 
-    size_t payload_len; 
+typedef struct
+{
+	uint8_t dstAddress[6];
+	uint8_t payload[ESPNOW_MAX_MESSAGE_LENGTH];
+	size_t payload_len;
 } comms_tx_queue_item_t;
 
-typedef struct {
-    uint8_t srcAddress[6];
-    uint8_t dstAddress[6]; 
-    uint8_t payload[ESPNOW_MAX_MESSAGE_LENGTH]; 
-    size_t payload_len; 
-    int8_t rssi;
+typedef struct
+{
+	uint8_t srcAddress[6];
+	uint8_t dstAddress[6];
+	uint8_t payload[ESPNOW_MAX_MESSAGE_LENGTH];
+	size_t payload_len;
+	int8_t rssi;
 } comms_rx_queue_item_t;
 
 #define DEBUG_PORT Serial
@@ -64,6 +70,7 @@ typedef struct
 	uint8_t severity;
 	uint8_t speed;
 	uint8_t debug;
+	uint8_t rebroadcasted;
 
 } message;
 
@@ -86,7 +93,8 @@ bool connectedOBD = false;
 
 bool coded(esp_err_t code, String str = "")
 {
-	if (str!=""){
+	if (str != "")
+	{
 		DEBUG_PORT << "LOG: " << str << ": ";
 	}
 	bool ret = false;
@@ -162,6 +170,7 @@ void sendCAM(uint8_t speed, uint8_t debug = 0x00)
 	m.speed = speed;
 	m.severity = 0;
 	m.debug = debug;
+	m.rebroadcasted = 0;
 
 	sendData(m);
 }
@@ -178,11 +187,9 @@ void sendDENM(uint8_t speed, uint8_t severity, uint8_t debug = 0x00)
 	m.speed = speed;
 	m.severity = severity;
 	m.debug = debug;
-
+	m.rebroadcasted = 0;
 	sendData(m);
 }
-
-
 
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
@@ -193,7 +200,10 @@ void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 	DEBUG_PORT << "LOG: Packet sent to " << macStr << ", " << (status == ESP_NOW_SEND_SUCCESS ? "delivery succeded." : "delivery failed.") << "\n";
 }
 
-void elaborateMessage(const uint8_t *data, int data_len)
+signed int flooding_rssiMin = -70;
+signed int flooding_rssiMax = -10;
+
+void elaborateMessage(const uint8_t *data, int data_len, signed int rssi)
 {
 	message *mex = (message *)data;
 
@@ -201,25 +211,39 @@ void elaborateMessage(const uint8_t *data, int data_len)
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
 			 mex->sender_address[0], mex->sender_address[1], mex->sender_address[2], mex->sender_address[3], mex->sender_address[4], mex->sender_address[5]);
 
-	DEBUG_PORT << (mex->type == 0 ? "CA MESSAGE" : "DEM MESSAGE") << " PACKET FROM " << macStr << " - SPEED " << mex->speed << " - SEVERITY: " << mex->severity << (mex->debug == 0x01 ? " - DEBUG MODE\n" : "\n");
+	DEBUG_PORT << (mex->type == 0 ? "CA MESSAGE" : "DEM MESSAGE") << " PACKET FROM " << macStr << " - SPEED " << mex->speed << " - SEVERITY: " << mex->severity << " - FWD: " << mex->rebroadcasted << (mex->debug == 0x01 ? " - DEBUG MODE\n" : "\n");
+
+#ifdef FLOODING
+	signed int floodingProb = 100;
+	if (rssi < flooding_rssiMax && mex->rebroadcasted == 0)
+	{
+		if (rssi >= flooding_rssiMin)
+		{
+			floodingProb = (flooding_rssiMax - rssi) / (flooding_rssiMax - flooding_rssiMin);
+		}
+
+		if (random(0, 101) > floodingProb)
+		{
+			mex->rebroadcasted = 1;
+			sendData(*mex);
+		}
+	}
+#endif
 }
 
 void onDataReceived(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 {
-	espnow_frame_format_t* espnow_data = (espnow_frame_format_t*)(data - sizeof (espnow_frame_format_t));
-    wifi_promiscuous_pkt_t* promiscuous_pkt = (wifi_promiscuous_pkt_t*)(data - sizeof (wifi_pkt_rx_ctrl_t) - sizeof (espnow_frame_format_t));
-    wifi_pkt_rx_ctrl_t* rx_ctrl = &promiscuous_pkt->rx_ctrl;
-
+	espnow_frame_format_t *espnow_data = (espnow_frame_format_t *)(data - sizeof(espnow_frame_format_t));
+	wifi_promiscuous_pkt_t *promiscuous_pkt = (wifi_promiscuous_pkt_t *)(data - sizeof(wifi_pkt_rx_ctrl_t) - sizeof(espnow_frame_format_t));
+	wifi_pkt_rx_ctrl_t *rx_ctrl = &promiscuous_pkt->rx_ctrl;
 
 	char macStr[18];
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
 			 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-	DEBUG_PORT << "LOG: Packet received from " << macStr << ". RSSI: "<<rx_ctrl->rssi<< "\n";
+	DEBUG_PORT << "LOG: Packet received from " << macStr << ". RSSI: " << rx_ctrl->rssi << "\n";
 
-	elaborateMessage(data, data_len);
+	elaborateMessage(data, data_len, rx_ctrl->rssi);
 }
-
-
 
 void initESPNow()
 {
@@ -284,12 +308,10 @@ void setup()
 
 	esp_wifi_set_promiscuous(true);
 
-
 	initESPNow();
 
 	esp_now_register_send_cb(onDataSent);
 	esp_now_register_recv_cb(onDataReceived);
-
 
 	initBroadcastPeer();
 }
@@ -305,13 +327,13 @@ void loop()
 		if (myELM327.nb_rx_state == ELM_SUCCESS)
 		{
 			// if is DENM case, send it asap
-			if (abs((int32_t)lastKphValue - tempKph)/(millis()-lastKphTime) > demn_gForceThreshold){
+			if (abs((int32_t)lastKphValue - tempKph) / (millis() - lastKphTime) > demn_gForceThreshold)
+			{
 				sendDENM((uint8_t)tempKph, 3);
 			}
 
 			currentKphValue = (uint8_t)tempKph;
 			lastKphTime = millis();
-		
 		}
 		else if (myELM327.nb_rx_state != ELM_GETTING_MSG)
 		{

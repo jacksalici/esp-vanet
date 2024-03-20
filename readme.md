@@ -25,6 +25,8 @@ The ESP32 is a low-cost low-power microcontroller family by Espressif very popul
 
 Moreover, it is connectionless, each device can be paired with up to 20 other peers, the max length of the payload is 250 Byte and the standard bit rate is 1 Mbps. As in WiFi, each device has a unique MAC address that can be used to send messages to it. For broadcast messaging, the address is `0xff:0xff:0xff:0xff:0xff:0xff`.
 
+The messages are sent in promiscuous mode to be able to monitor the packets. In particular, using this mode it makes possible to get the _Received Signal Strength Indicator_ (**RSSI**) for each packet, as done in [other libraries](https://github.com/gmag11/QuickESPNow/blob/main/src/QuickEspNow_esp32.cpp#L365-L357).
+
 ### CAM and DEMN
 
 ETSI TC ITS (Intelligent Transport Systems) has defined a _Basic Set of Applications_ provided to manage two types of messages.
@@ -46,13 +48,27 @@ On the other hand, CAM messages are sent with a variable frequency (1-10Hz), tha
 
 For this project the time values are constant and only the last movement constraint is adopted, this is due to some technical constraints explained below.  
 
+#### Flooding and broadcast suppression
+
+Since the V2V connection was born to handle infrastructure-less environments, every packet received can be rebroadcasted once to spread the messages to further vehicles. However, to avoid the huge noise problem, the IEEE 802.11p RSS broadcast suppression approach is applied also in this project. In particular, every packet received from a vehicle is retransmitted (_up to once_) with a probability $p$ computed as below.
+$$
+
+    p = 
+\begin{cases}
+    0, & \text{RSSI} > \text{RSS}_{max} \\
+    \frac{\text{RSS}_{max}-\text{RSSI}}{\text{RSS}_{max}-\text{RSS}_{min}},& \text{RSS}_{min} \le \text{RSSI} \le \text{RSS}_{max}\\
+    1, & \text{RSSI} < \text{RSS}_{min}
+\end{cases}
+$$
+
+
+
 ### OBD-2 port adaptor
 
 The On-Board Diagnostic is a standardized way to provide vehicles with self-diagnostic and reporting capability. It can also be used to read real-time data along with several diagnostic trouble codes. In his second standard version, it is accessible from the _data link connector_ (DLC), a 16-pin D-shaped connector places usually in the instrument panel. Two of these pins are the CAN high and the CAN low, while the others have other purposes such as a 12V battery output voltage.  
 
-To use this port, in this project, an ELM327 chip has been used, since it can abstract the low-level protocol and present it as a simple interface that can be called via a UART or by USB, RS-232, Wi-Fi or, as in this case, via Bluetooth. The 
-queries are managed by the [ELMduino](https://github.com/PowerBroker2/ELMduino) library.  
+To use this port, in this project, an ELM327 chip has been used, since it can abstract the low-level protocol and present it as a simple interface that can be called via a UART or by USB, RS-232, Wi-Fi or, as in this case, via Bluetooth. The queries are managed by the [ELMduino](https://github.com/PowerBroker2/ELMduino) library.  
 
 #### Caveats
 
-Although the OBD-2 port could been reverse-engineered to take several information that change from manufacturer to manufacturer such as steering angles and air-bag crashes, in this project only standard codes are used, so that it remains valid for every car manufacturer. This is the reason why currently only the deceleration is taken into account when DENM are generated.  
+Although the OBD-2 port could been reverse-engineered and read data such as steering angles and air-bag crashes, these change from manufacturer to manufacturer. This project uses only standard codes so that it can remain valid for every car manufacturer. This is the reason why currently only the deceleration is taken into account when DENM are generated.  

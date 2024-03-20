@@ -51,15 +51,15 @@ For this project the time values are constant and only the last movement constra
 #### Flooding and broadcast suppression
 
 Since the V2V connection was born to handle infrastructure-less environments, every packet received can be rebroadcasted once to spread the messages to further vehicles. However, to avoid the huge noise problem, the IEEE 802.11p RSS broadcast suppression approach is applied also in this project. In particular, every packet received from a vehicle is retransmitted (_up to once_) with a probability $p$ computed as below.
-$$
 
-    p = 
+```math
+p = 
 \begin{cases}
     0, & \text{RSSI} > \text{RSS}_{max} \\
     \frac{\text{RSS}_{max}-\text{RSSI}}{\text{RSS}_{max}-\text{RSS}_{min}},& \text{RSS}_{min} \le \text{RSSI} \le \text{RSS}_{max}\\
     1, & \text{RSSI} < \text{RSS}_{min}
 \end{cases}
-$$
+```
 
 
 

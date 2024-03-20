@@ -1,6 +1,45 @@
 #include <Arduino.h>
 #include <esp_now.h>
 #include <WiFi.h>
+#include "esp_wifi.h"
+
+static const size_t ESPNOW_MAX_MESSAGE_LENGTH = 250; 
+static const uint8_t ESPNOW_ADDR_LEN = 6;
+
+typedef struct {
+    uint16_t frame_head;
+    uint16_t duration;
+    uint8_t destination_address[6];
+    uint8_t source_address[6];
+    uint8_t broadcast_address[6];
+    uint16_t sequence_control;
+
+    uint8_t category_code;
+    uint8_t organization_identifier[3]; 
+    uint8_t random_values[4];
+    struct {
+        uint8_t element_id;                 
+        uint8_t lenght;                     
+        uint8_t organization_identifier[3]; 
+        uint8_t type;                       
+        uint8_t version;
+        uint8_t body[0];
+    } vendor_specific_content;
+} __attribute__ ((packed)) espnow_frame_format_t;
+
+typedef struct {
+    uint8_t dstAddress[6];
+    uint8_t payload[ESPNOW_MAX_MESSAGE_LENGTH]; 
+    size_t payload_len; 
+} comms_tx_queue_item_t;
+
+typedef struct {
+    uint8_t srcAddress[6];
+    uint8_t dstAddress[6]; 
+    uint8_t payload[ESPNOW_MAX_MESSAGE_LENGTH]; 
+    size_t payload_len; 
+    int8_t rssi;
+} comms_rx_queue_item_t;
 
 #define DEBUG_PORT Serial
 
@@ -17,10 +56,10 @@ enum type_message : uint8_t
 	DEMN = 1
 };
 
-typedef struct message
+typedef struct
 {
 	type_message type;
-	uint8_t address[6];
+	uint8_t sender_address[6];
 	uint8_t coordinates[3];
 	uint8_t severity;
 	uint8_t speed;
@@ -114,7 +153,7 @@ void sendCAM(uint8_t speed, uint8_t debug = 0x00)
 {
 
 	message m;
-	esp_read_mac(m.address, ESP_MAC_WIFI_SOFTAP);
+	esp_read_mac(m.sender_address, ESP_MAC_WIFI_STA);
 
 	m.type = CAM;
 
@@ -129,9 +168,8 @@ void sendCAM(uint8_t speed, uint8_t debug = 0x00)
 
 void sendDENM(uint8_t speed, uint8_t severity, uint8_t debug = 0x00)
 {
-
 	message m;
-	esp_read_mac(m.address, ESP_MAC_WIFI_SOFTAP);
+	esp_read_mac(m.sender_address, ESP_MAC_WIFI_SOFTAP);
 
 	m.type = CAM;
 
@@ -141,20 +179,10 @@ void sendDENM(uint8_t speed, uint8_t severity, uint8_t debug = 0x00)
 	m.severity = severity;
 	m.debug = debug;
 
-
 	sendData(m);
 }
 
-void elaborateMessage(const uint8_t *data, int data_len)
-{
-	message *mex = (message *)data;
 
-	char macStr[18];
-	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
-			 mex->address[0], mex->address[1], mex->address[2], mex->address[3], mex->address[4], mex->address[5]);
-
-	DEBUG_PORT << (mex->type == 0 ? "DEN MESSAGE" : "CA MESSAGE") << " PACKET FROM " << macStr << " - SPEED " << mex->speed << " - SEVERITY: " << mex->severity << (mex->debug == 0x01 ? " DEBUG MODE\n" : "\n");
-}
 
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
@@ -165,15 +193,33 @@ void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 	DEBUG_PORT << "LOG: Packet sent to " << macStr << ", " << (status == ESP_NOW_SEND_SUCCESS ? "delivery succeded." : "delivery failed.") << "\n";
 }
 
+void elaborateMessage(const uint8_t *data, int data_len)
+{
+	message *mex = (message *)data;
+
+	char macStr[18];
+	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+			 mex->sender_address[0], mex->sender_address[1], mex->sender_address[2], mex->sender_address[3], mex->sender_address[4], mex->sender_address[5]);
+
+	DEBUG_PORT << (mex->type == 0 ? "CA MESSAGE" : "DEM MESSAGE") << " PACKET FROM " << macStr << " - SPEED " << mex->speed << " - SEVERITY: " << mex->severity << (mex->debug == 0x01 ? " - DEBUG MODE\n" : "\n");
+}
+
 void onDataReceived(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 {
+	espnow_frame_format_t* espnow_data = (espnow_frame_format_t*)(data - sizeof (espnow_frame_format_t));
+    wifi_promiscuous_pkt_t* promiscuous_pkt = (wifi_promiscuous_pkt_t*)(data - sizeof (wifi_pkt_rx_ctrl_t) - sizeof (espnow_frame_format_t));
+    wifi_pkt_rx_ctrl_t* rx_ctrl = &promiscuous_pkt->rx_ctrl;
+
+
 	char macStr[18];
 	snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
 			 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-	DEBUG_PORT << "LOG: Packet received from " << macStr << ".\n";
+	DEBUG_PORT << "LOG: Packet received from " << macStr << ". RSSI: "<<rx_ctrl->rssi<< "\n";
 
 	elaborateMessage(data, data_len);
 }
+
+
 
 void initESPNow()
 {
@@ -190,7 +236,6 @@ void initESPNow()
 }
 void initBroadcastPeer()
 {
-	// clear slave data
 	memset(&broadcast_peer, 0, sizeof(broadcast_peer));
 	memcpy(broadcast_peer.peer_addr, broadcast_address, 6 * sizeof(uint8_t));
 	broadcast_peer.encrypt = 0; // no encryption
@@ -237,10 +282,14 @@ void setup()
 
 	WiFi.mode(WIFI_STA);
 
+	esp_wifi_set_promiscuous(true);
+
+
 	initESPNow();
 
 	esp_now_register_send_cb(onDataSent);
 	esp_now_register_recv_cb(onDataReceived);
+
 
 	initBroadcastPeer();
 }
@@ -271,7 +320,7 @@ void loop()
 	}
 #endif
 
-	// if cam generation costraint are respected, generate cam (with or without debug mode)
+	// if CAM generation costraint are respected, generate CAM (in debug mode if not connected to OBD2)
 	if (
 		(millis() > cam_lastGenMillis + cam_genMaxMillis) ||
 		((millis() > cam_lastGenMillis + cam_genMinMillis) &&

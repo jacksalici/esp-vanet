@@ -72,3 +72,24 @@ To use this port, in this project, an ELM327 chip has been used, since it can ab
 #### Caveats
 
 Although the OBD-2 port could been reverse-engineered and read data such as steering angles and air-bag crashes, these change from manufacturer to manufacturer. This project uses only standard codes so that it can remain valid for every car manufacturer. This is the reason why currently only the deceleration is taken into account when DENM are generated.  
+
+## Message Structure
+
+The structure is used both for the DENM and the CAM, so a `type_message` enum is used to distinguish them.
+
+```cpp
+enum type_message : uint8_t{
+	CAM = 0,
+	DEMN = 1
+};
+
+typedef struct{
+	type_message type;
+	uint8_t sender_address[6]; //original sender, not change when the message is forwarded
+	uint8_t coordinates[3]; //currently not used, but present in the standard
+	uint8_t severity;  //from 0 to 5, used only for the DENM
+	uint8_t speed; //read from the ODB port
+	uint8_t debug; //boolean; when debugging, the speed is random
+	uint8_t rebroadcasted; //boolean; becomes true after the first time the packet is forwarded
+} message;
+```

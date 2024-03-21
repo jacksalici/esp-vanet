@@ -4,7 +4,7 @@
 #include "esp_wifi.h"
 
 #define FLOODING
-#define DEBUGGING false
+#define DEBUGGING true
 
 static const size_t ESPNOW_MAX_MESSAGE_LENGTH = 250;
 static const uint8_t ESPNOW_ADDR_LEN = 6;
@@ -60,7 +60,7 @@ Print &operator<<(Print &printer, T value)
 enum type_message : uint8_t
 {
 	CAM = 0,
-	DEMN = 1
+	DENM = 1
 };
 
 typedef struct
@@ -271,7 +271,7 @@ long lastKphTime = 0;
 uint8_t lastKphValue = 0;
 uint8_t currentKphValue = 0;
 
-short demn_gForceThreshold = 9.8 * 3.6 * 1;
+short denm_gForceThreshold = 9.8 * 3.6 * 1;
 
 long cam_lastGenMillis = -1000;
 short cam_kphThreshold = 0.5 * 3.6;
@@ -328,7 +328,7 @@ void loop()
 		if (myELM327.nb_rx_state == ELM_SUCCESS)
 		{
 			// if is DENM case, send it asap
-			if (abs((int32_t)lastKphValue - tempKph) / (millis() - lastKphTime) > demn_gForceThreshold)
+			if (abs((int32_t)lastKphValue - tempKph) / (millis() - lastKphTime) > denm_gForceThreshold)
 			{
 				sendDENM((uint8_t)tempKph, 3);
 			}
